@@ -71,6 +71,8 @@ public class SetupRejectionTest {
     LeaksTrackingByteBufAllocator allocator =
         LeaksTrackingByteBufAllocator.instrument(ByteBufAllocator.DEFAULT);
     TestDuplexConnection conn = new TestDuplexConnection(allocator);
+    Sinks.Empty<Void> onGracefulShutdownStartedSink = Sinks.empty();
+    Sinks.Empty<Void> onGracefulShutdownSink = Sinks.empty();
     Sinks.Empty<Void> onThisSideClosedSink = Sinks.empty();
 
     RSocketRequester rSocket =
@@ -86,7 +88,10 @@ public class SetupRejectionTest {
             null,
             __ -> null,
             null,
+            onGracefulShutdownStartedSink,
+            onGracefulShutdownSink,
             onThisSideClosedSink,
+            onGracefulShutdownSink.asMono(),
             onThisSideClosedSink.asMono());
 
     String errorMsg = "error";
@@ -114,6 +119,8 @@ public class SetupRejectionTest {
     LeaksTrackingByteBufAllocator allocator =
         LeaksTrackingByteBufAllocator.instrument(ByteBufAllocator.DEFAULT);
     TestDuplexConnection conn = new TestDuplexConnection(allocator);
+    Sinks.Empty<Void> onGracefulShutdownStartedSink = Sinks.empty();
+    Sinks.Empty<Void> onGracefulShutdownSink = Sinks.empty();
     Sinks.Empty<Void> onThisSideClosedSink = Sinks.empty();
     RSocketRequester rSocket =
         new RSocketRequester(
@@ -128,7 +135,10 @@ public class SetupRejectionTest {
             null,
             __ -> null,
             null,
+            onGracefulShutdownStartedSink,
+            onGracefulShutdownSink,
             onThisSideClosedSink,
+            onGracefulShutdownSink.asMono(),
             onThisSideClosedSink.asMono());
 
     conn.addToReceivedBuffer(

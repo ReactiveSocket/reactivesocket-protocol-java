@@ -92,6 +92,9 @@ class RSocketLeaseTest {
 
   private Sinks.Many<Lease> leaseSender = Sinks.many().multicast().onBackpressureBuffer();
   private RequesterLeaseTracker requesterLeaseTracker;
+  protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
+  protected Sinks.Empty<Void> otherGracefulShutdownSink;
+  protected Sinks.Empty<Void> thisGracefulShutdownSink;
   protected Sinks.Empty<Void> thisClosedSink;
   protected Sinks.Empty<Void> otherClosedSink;
 
@@ -103,6 +106,9 @@ class RSocketLeaseTest {
     connection = new TestDuplexConnection(byteBufAllocator);
     requesterLeaseTracker = new RequesterLeaseTracker(TAG, 0);
     responderLeaseTracker = new ResponderLeaseTracker(TAG, connection, () -> leaseSender.asFlux());
+    this.onGracefulShutdownStartedSink = Sinks.empty();
+    this.otherGracefulShutdownSink = Sinks.empty();
+    this.thisGracefulShutdownSink = Sinks.empty();
     this.thisClosedSink = Sinks.empty();
     this.otherClosedSink = Sinks.empty();
 
@@ -121,7 +127,10 @@ class RSocketLeaseTest {
             null,
             __ -> null,
             requesterLeaseTracker,
+            onGracefulShutdownStartedSink,
+            thisGracefulShutdownSink,
             thisClosedSink,
+            otherGracefulShutdownSink.asMono().and(thisGracefulShutdownSink.asMono()),
             otherClosedSink.asMono().and(thisClosedSink.asMono()));
 
     mockRSocketHandler = mock(RSocket.class);
@@ -190,7 +199,9 @@ class RSocketLeaseTest {
             FRAME_LENGTH_MASK,
             Integer.MAX_VALUE,
             __ -> null,
-            otherClosedSink);
+            otherGracefulShutdownSink,
+            otherClosedSink,
+            onGracefulShutdownStartedSink.asMono());
   }
 
   @AfterEach

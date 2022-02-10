@@ -63,6 +63,9 @@ class RSocketRequesterSubscribersTest {
   private LeaksTrackingByteBufAllocator allocator;
   private RSocket rSocketRequester;
   private TestDuplexConnection connection;
+  protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
+  protected Sinks.Empty<Void> otherGracefulShutdownSink;
+  protected Sinks.Empty<Void> thisGracefulShutdownSink;
   protected Sinks.Empty<Void> thisClosedSink;
   protected Sinks.Empty<Void> otherClosedSink;
 
@@ -75,6 +78,9 @@ class RSocketRequesterSubscribersTest {
   void setUp() {
     allocator = LeaksTrackingByteBufAllocator.instrument(ByteBufAllocator.DEFAULT);
     connection = new TestDuplexConnection(allocator);
+    this.onGracefulShutdownStartedSink = Sinks.empty();
+    this.otherGracefulShutdownSink = Sinks.empty();
+    this.thisGracefulShutdownSink = Sinks.empty();
     this.thisClosedSink = Sinks.empty();
     this.otherClosedSink = Sinks.empty();
     rSocketRequester =
@@ -90,7 +96,10 @@ class RSocketRequesterSubscribersTest {
             null,
             __ -> null,
             null,
+            onGracefulShutdownStartedSink,
+            thisGracefulShutdownSink,
             thisClosedSink,
+            otherGracefulShutdownSink.asMono().and(thisGracefulShutdownSink.asMono()),
             otherClosedSink.asMono().and(thisClosedSink.asMono()));
   }
 

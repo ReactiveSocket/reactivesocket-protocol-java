@@ -67,12 +67,14 @@ import io.rsocket.test.util.TestSubscriber;
 import io.rsocket.util.ByteBufPayload;
 import io.rsocket.util.DefaultPayload;
 import io.rsocket.util.EmptyPayload;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
+import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Assumptions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -1179,12 +1181,79 @@ public class RSocketResponderTest {
     rule.assertHasNoLeaks();
   }
 
+  @Test
+  void testGracefulShutdown() {
+    final AssertSubscriber<Void> onCloseSubscriber = AssertSubscriber.create();
+    final AssertSubscriber<Void> onGracefulShutdownSubscriber = AssertSubscriber.create();
+    final Sinks.Empty<Void> onDisposeGracefullySink = Sinks.unsafe().empty();
+
+    boolean[] disposed = new boolean[] {false};
+    boolean[] disposedGracefully = new boolean[] {false};
+
+    rule.setAcceptingSocket(
+        new RSocket() {
+
+          @Override
+          public Flux<Payload> requestStream(Payload payload) {
+            return Flux.interval(Duration.ofMillis(100))
+                .takeUntilOther(onDisposeGracefullySink.asMono())
+                .map(tick -> ByteBufPayload.create(String.valueOf(tick)));
+          }
+
+          @Override
+          public void dispose() {
+            disposed[0] = true;
+          }
+
+          @Override
+          public void disposeGracefully() {
+            disposedGracefully[0] = true;
+          }
+        });
+
+    rule.connection.addToReceivedBuffer(
+        RequestStreamFrameCodec.encode(
+            rule.allocator, 1, false, Long.MAX_VALUE, null, Unpooled.EMPTY_BUFFER));
+
+    rule.onCloseSink.asMono().subscribe(onCloseSubscriber);
+    rule.onGracefulShutdownSink.asMono().subscribe(onGracefulShutdownSubscriber);
+
+    rule.onGracefulShutdownStartedSink.tryEmitEmpty();
+    Assertions.assertThat(disposed[0]).isFalse();
+    Assertions.assertThat(disposedGracefully[0]).isTrue();
+    Assertions.assertThat(rule.connection.isDisposed()).isFalse();
+    onCloseSubscriber.assertNotTerminated();
+    onGracefulShutdownSubscriber.assertNotTerminated();
+
+    onDisposeGracefullySink.tryEmitEmpty();
+    Assertions.assertThat(disposed[0]).isFalse();
+    Assertions.assertThat(disposedGracefully[0]).isTrue();
+    Assertions.assertThat(rule.connection.isDisposed()).isFalse();
+    onCloseSubscriber.assertNotTerminated();
+    onGracefulShutdownSubscriber.assertTerminated();
+
+    ByteBuf possibleCompleteFrame = rule.connection.pollFrame();
+
+    if (possibleCompleteFrame != null) {
+      FrameAssert.assertThat(possibleCompleteFrame).typeOf(COMPLETE).hasNoLeaks();
+    }
+
+    rule.connection.dispose();
+    Assertions.assertThat(disposed[0]).isTrue();
+    Assertions.assertThat(disposedGracefully[0]).isTrue();
+    Assertions.assertThat(rule.connection.isDisposed()).isTrue();
+    onCloseSubscriber.assertTerminated();
+    onGracefulShutdownSubscriber.assertTerminated();
+  }
+
   public static class ServerSocketRule extends AbstractSocketRule<RSocketResponder> {
 
     private RSocket acceptingSocket;
     private volatile int prefetch;
     private RequestInterceptor requestInterceptor;
+    protected Sinks.Empty<Void> onGracefulShutdownSink;
     protected Sinks.Empty<Void> onCloseSink;
+    protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
 
     @Override
     protected void doInit() {
@@ -1221,7 +1290,9 @@ public class RSocketResponderTest {
 
     @Override
     protected RSocketResponder newRSocket() {
+      onGracefulShutdownSink = Sinks.empty();
       onCloseSink = Sinks.empty();
+      onGracefulShutdownStartedSink = Sinks.empty();
       return new RSocketResponder(
           connection,
           acceptingSocket,
@@ -1231,7 +1302,9 @@ public class RSocketResponderTest {
           maxFrameLength,
           maxInboundPayloadSize,
           __ -> requestInterceptor,
-          onCloseSink);
+          onGracefulShutdownSink,
+          onCloseSink,
+          onGracefulShutdownStartedSink.asMono());
     }
 
     private void sendRequest(int streamId, FrameType frameType) {

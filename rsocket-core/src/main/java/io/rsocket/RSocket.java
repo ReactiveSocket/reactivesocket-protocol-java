@@ -87,6 +87,8 @@ public interface RSocket extends Availability, Closeable {
   @Override
   default void dispose() {}
 
+  default void disposeGracefully() {}
+
   @Override
   default boolean isDisposed() {
     return false;
