@@ -438,8 +438,11 @@ public final class RSocketServer {
             requesterLeaseTracker = null;
           }
 
+          final Sinks.Empty<Void> requesterOnGracefulShutdownSink = Sinks.unsafe().empty();
+          final Sinks.Empty<Void> responderOnGracefulShutdownSink = Sinks.unsafe().empty();
           final Sinks.Empty<Void> requesterOnAllClosedSink = Sinks.unsafe().empty();
           final Sinks.Empty<Void> responderOnAllClosedSink = Sinks.unsafe().empty();
+          final Sinks.Empty<Void> requesterGracefulShutdownStartedSink = Sinks.unsafe().empty();
 
           RSocket rSocketRequester =
               new RSocketRequester(
@@ -454,7 +457,12 @@ public final class RSocketServer {
                   keepAliveHandler,
                   interceptors::initRequesterRequestInterceptor,
                   requesterLeaseTracker,
+                  requesterGracefulShutdownStartedSink,
+                  requesterOnGracefulShutdownSink,
                   requesterOnAllClosedSink,
+                  Mono.whenDelayError(
+                      responderOnGracefulShutdownSink.asMono(),
+                      requesterOnGracefulShutdownSink.asMono()),
                   Mono.whenDelayError(
                       responderOnAllClosedSink.asMono(), requesterOnAllClosedSink.asMono()));
 
@@ -489,7 +497,9 @@ public final class RSocketServer {
                                     interceptors.initResponderRequestInterceptor(
                                         rSocket, (RequestInterceptor) leases.sender)
                                 : interceptors::initResponderRequestInterceptor,
-                            responderOnAllClosedSink);
+                            responderOnGracefulShutdownSink,
+                            responderOnAllClosedSink,
+                            requesterGracefulShutdownStartedSink.asMono());
                   })
               .doFinally(signalType -> setupPayload.release())
               .then();

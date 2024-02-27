@@ -721,6 +721,8 @@ public class DefaultRSocketClientTests {
     protected Runnable delayer;
     protected Sinks.One<RSocket> producer;
 
+    protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
+    protected Sinks.Empty<Void> thisGracefulShutdownSink;
     protected Sinks.Empty<Void> thisClosedSink;
 
     @Override
@@ -740,6 +742,8 @@ public class DefaultRSocketClientTests {
 
     @Override
     protected RSocket newRSocket() {
+      this.onGracefulShutdownStartedSink = Sinks.empty();
+      this.thisGracefulShutdownSink = Sinks.empty();
       this.thisClosedSink = Sinks.empty();
       return new RSocketRequester(
           connection,
@@ -753,7 +757,10 @@ public class DefaultRSocketClientTests {
           null,
           __ -> null,
           null,
+          onGracefulShutdownStartedSink,
+          thisGracefulShutdownSink,
           thisClosedSink,
+          thisGracefulShutdownSink.asMono(),
           thisClosedSink.asMono());
     }
   }

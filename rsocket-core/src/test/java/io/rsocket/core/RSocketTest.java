@@ -515,6 +515,9 @@ public class RSocketTest {
     private RSocket requestAcceptor;
 
     private LeaksTrackingByteBufAllocator allocator;
+    protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
+    protected Sinks.Empty<Void> otherGracefulShutdownSink;
+    protected Sinks.Empty<Void> thisGracefulShutdownSink;
     protected Sinks.Empty<Void> thisClosedSink;
     protected Sinks.Empty<Void> otherClosedSink;
 
@@ -527,6 +530,9 @@ public class RSocketTest {
       serverProcessor = Sinks.many().multicast().directBestEffort();
       clientProcessor = Sinks.many().multicast().directBestEffort();
 
+      this.onGracefulShutdownStartedSink = Sinks.empty();
+      this.otherGracefulShutdownSink = Sinks.empty();
+      this.thisGracefulShutdownSink = Sinks.empty();
       this.thisClosedSink = Sinks.empty();
       this.otherClosedSink = Sinks.empty();
 
@@ -578,7 +584,9 @@ public class RSocketTest {
               FRAME_LENGTH_MASK,
               Integer.MAX_VALUE,
               __ -> null,
-              otherClosedSink);
+              otherGracefulShutdownSink,
+              otherClosedSink,
+              onGracefulShutdownStartedSink.asMono());
 
       crs =
           new RSocketRequester(
@@ -593,7 +601,10 @@ public class RSocketTest {
               null,
               __ -> null,
               null,
+              onGracefulShutdownStartedSink,
+              thisGracefulShutdownSink,
               thisClosedSink,
+              otherGracefulShutdownSink.asMono().and(thisGracefulShutdownSink.asMono()),
               otherClosedSink.asMono().and(thisClosedSink.asMono()));
     }
 

@@ -23,6 +23,7 @@ import io.netty.util.collection.IntObjectMap;
 import io.rsocket.DuplexConnection;
 import io.rsocket.Payload;
 import io.rsocket.RSocket;
+import io.rsocket.exceptions.ConnectionCloseException;
 import io.rsocket.exceptions.ConnectionErrorException;
 import io.rsocket.exceptions.Exceptions;
 import io.rsocket.frame.ErrorFrameCodec;
@@ -67,6 +68,7 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
 
   @Nullable private final RequesterLeaseTracker requesterLeaseTracker;
 
+  private final Sinks.Empty<Void> onGracefulShutdownStartedSink;
   private final Sinks.Empty<Void> onThisSideClosedSink;
   private final Mono<Void> onAllClosed;
   private final KeepAliveFramesAcceptor keepAliveFramesAcceptor;
@@ -83,7 +85,10 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
       @Nullable KeepAliveHandler keepAliveHandler,
       Function<RSocket, RequestInterceptor> requestInterceptorFunction,
       @Nullable RequesterLeaseTracker requesterLeaseTracker,
+      Sinks.Empty<Void> onGracefulShutdownStartedSink,
+      Sinks.Empty<Void> onGracefulShutdownSink,
       Sinks.Empty<Void> onThisSideClosedSink,
+      Mono<Void> onGracefulShutdownDone,
       Mono<Void> onAllClosed) {
     super(
         mtu,
@@ -92,14 +97,17 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
         payloadDecoder,
         connection,
         streamIdSupplier,
-        requestInterceptorFunction);
+        requestInterceptorFunction,
+        onGracefulShutdownSink);
 
     this.requesterLeaseTracker = requesterLeaseTracker;
+    this.onGracefulShutdownStartedSink = onGracefulShutdownStartedSink;
     this.onThisSideClosedSink = onThisSideClosedSink;
     this.onAllClosed = onAllClosed;
 
     // DO NOT Change the order here. The Send processor must be subscribed to before receiving
     connection.onClose().subscribe(null, this::tryShutdown, this::tryShutdown);
+    onGracefulShutdownDone.subscribe(null, null, connection::dispose);
 
     connection.receive().subscribe(this::handleIncomingFrames, e -> {});
 
@@ -198,6 +206,17 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
     }
 
     getDuplexConnection().sendErrorAndClose(new ConnectionErrorException("Disposed"));
+  }
+
+  @Override
+  public void disposeGracefully() {
+    getDuplexConnection()
+        .sendFrame(
+            0,
+            ErrorFrameCodec.encode(
+                getAllocator(), 0, new ConnectionCloseException("Graceful Shutdown")));
+    this.onGracefulShutdownStartedSink.tryEmitEmpty();
+    super.terminate();
   }
 
   @Override
@@ -351,6 +370,12 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
     }
     if (terminationError == null) {
       Throwable e = errorSupplier.get();
+
+      if (e instanceof ConnectionCloseException) {
+        this.onGracefulShutdownStartedSink.tryEmitEmpty();
+        super.terminate();
+        return;
+      }
       if (TERMINATION_ERROR.compareAndSet(this, null, e)) {
         terminate(e);
       } else {
@@ -417,7 +442,7 @@ class RSocketRequester extends RequesterResponderSupport implements RSocket {
       requesterLeaseTracker.dispose(e);
     }
 
-    final Collection<FrameHandler> activeStreamsCopy;
+    final Collection<FrameHandler> activeStreamsCopy; // in case of graceful shut down is empty
     synchronized (this) {
       final IntObjectMap<FrameHandler> activeStreams = this.activeStreams;
       activeStreamsCopy = new ArrayList<>(activeStreams.values());

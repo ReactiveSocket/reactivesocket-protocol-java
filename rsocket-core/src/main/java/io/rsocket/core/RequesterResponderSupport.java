@@ -5,10 +5,12 @@ import io.netty.util.collection.IntObjectHashMap;
 import io.netty.util.collection.IntObjectMap;
 import io.rsocket.DuplexConnection;
 import io.rsocket.RSocket;
+import io.rsocket.exceptions.CanceledException;
 import io.rsocket.frame.decoder.PayloadDecoder;
 import io.rsocket.plugins.RequestInterceptor;
 import java.util.Objects;
 import java.util.function.Function;
+import reactor.core.publisher.Sinks;
 import reactor.util.annotation.Nullable;
 
 class RequesterResponderSupport {
@@ -19,10 +21,14 @@ class RequesterResponderSupport {
   private final PayloadDecoder payloadDecoder;
   private final ByteBufAllocator allocator;
   private final DuplexConnection connection;
+  private final Sinks.Empty<Void> onGracefulShutdownSink;
   @Nullable private final RequestInterceptor requestInterceptor;
 
   @Nullable final StreamIdSupplier streamIdSupplier;
   final IntObjectMap<FrameHandler> activeStreams;
+
+  boolean terminating;
+  boolean terminated;
 
   public RequesterResponderSupport(
       int mtu,
@@ -31,7 +37,8 @@ class RequesterResponderSupport {
       PayloadDecoder payloadDecoder,
       DuplexConnection connection,
       @Nullable StreamIdSupplier streamIdSupplier,
-      Function<RSocket, ? extends RequestInterceptor> requestInterceptorFunction) {
+      Function<RSocket, ? extends RequestInterceptor> requestInterceptorFunction,
+      Sinks.Empty<Void> onGracefulShutdownSink) {
 
     this.activeStreams = new IntObjectHashMap<>();
     this.mtu = mtu;
@@ -41,6 +48,7 @@ class RequesterResponderSupport {
     this.allocator = connection.alloc();
     this.streamIdSupplier = streamIdSupplier;
     this.connection = connection;
+    this.onGracefulShutdownSink = onGracefulShutdownSink;
     this.requestInterceptor = requestInterceptorFunction.apply((RSocket) this);
   }
 
@@ -88,6 +96,9 @@ class RequesterResponderSupport {
     final StreamIdSupplier streamIdSupplier = this.streamIdSupplier;
     if (streamIdSupplier != null) {
       synchronized (this) {
+        if (this.terminating) {
+          throw new CanceledException("Disposed");
+        }
         return streamIdSupplier.nextStreamId(this.activeStreams);
       }
     } else {
@@ -107,6 +118,10 @@ class RequesterResponderSupport {
     if (streamIdSupplier != null) {
       final IntObjectMap<FrameHandler> activeStreams = this.activeStreams;
       synchronized (this) {
+        if (this.terminating) {
+          throw new CanceledException("Disposed");
+        }
+
         final int streamId = streamIdSupplier.nextStreamId(activeStreams);
 
         activeStreams.put(streamId, frameHandler);
@@ -119,6 +134,11 @@ class RequesterResponderSupport {
   }
 
   public synchronized boolean add(int streamId, FrameHandler frameHandler) {
+    if (this.terminating) {
+      throw new CanceledException(
+          "This RSocket is either disposed or disposing, and no longer accepting new requests");
+    }
+
     final IntObjectMap<FrameHandler> activeStreams = this.activeStreams;
     // copy of Map.putIfAbsent(key, value) without `streamId` boxing
     final FrameHandler previousHandler = activeStreams.get(streamId);
@@ -148,14 +168,45 @@ class RequesterResponderSupport {
    * @return {@code true} if there is {@link FrameHandler} for the given {@code streamId} and the
    *     instance equals to the passed one
    */
-  public synchronized boolean remove(int streamId, FrameHandler frameHandler) {
-    final IntObjectMap<FrameHandler> activeStreams = this.activeStreams;
-    // copy of Map.remove(key, value) without `streamId` boxing
-    final FrameHandler curValue = activeStreams.get(streamId);
-    if (!Objects.equals(curValue, frameHandler)) {
-      return false;
+  public boolean remove(int streamId, FrameHandler frameHandler) {
+    final boolean terminated;
+    synchronized (this) {
+      final IntObjectMap<FrameHandler> activeStreams = this.activeStreams;
+      // copy of Map.remove(key, value) without `streamId` boxing
+      final FrameHandler curValue = activeStreams.get(streamId);
+      if (!Objects.equals(curValue, frameHandler)) {
+        return false;
+      }
+      activeStreams.remove(streamId);
+      if (this.terminating && activeStreams.size() == 0) {
+        terminated = true;
+        this.terminated = true;
+      } else {
+        terminated = false;
+      }
     }
-    activeStreams.remove(streamId);
+
+    if (terminated) {
+      onGracefulShutdownSink.tryEmitEmpty();
+    }
     return true;
+  }
+
+  public void terminate() {
+    final boolean terminated;
+    synchronized (this) {
+      this.terminating = true;
+
+      if (activeStreams.size() == 0) {
+        terminated = true;
+        this.terminated = true;
+      } else {
+        terminated = false;
+      }
+    }
+
+    if (terminated) {
+      onGracefulShutdownSink.tryEmitEmpty();
+    }
   }
 }

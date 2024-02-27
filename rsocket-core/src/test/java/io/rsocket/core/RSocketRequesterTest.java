@@ -82,6 +82,7 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Assumptions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -96,6 +97,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+import reactor.core.Disposable;
 import reactor.core.Scannable;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
@@ -1469,13 +1471,70 @@ public class RSocketRequesterTest {
     }
   }
 
+  @Test
+  public void testDisposeGracefully() {
+    System.out.println(
+        FrameHeaderCodec.frameType(
+            Unpooled.wrappedBuffer(ByteBufUtil.decodeHexDump("000000012400"))));
+    final RSocketRequester rSocketRequester = rule.socket;
+    final AssertSubscriber<Void> onGracefulShutdownSubscriber =
+        rule.thisGracefulShutdownSink.asMono().subscribeWith(AssertSubscriber.create());
+    final AssertSubscriber<Void> onCloseSubscriber =
+        rSocketRequester.onClose().subscribeWith(new AssertSubscriber<>());
+
+    final Disposable stream = rSocketRequester.requestStream(EmptyPayload.INSTANCE).subscribe();
+
+    FrameAssert.assertThat(rule.connection.awaitFrame())
+        .typeOf(REQUEST_STREAM)
+        .hasClientSideStreamId()
+        .hasNoLeaks();
+
+    Assertions.assertThat(rSocketRequester.isDisposed()).isFalse();
+
+    rSocketRequester.disposeGracefully();
+    Assertions.assertThat(rSocketRequester.isDisposed()).isFalse();
+    onGracefulShutdownSubscriber.assertNotTerminated();
+
+    FrameAssert.assertThat(rule.connection.awaitFrame())
+        .typeOf(FrameType.ERROR)
+        .hasStreamIdZero()
+        .hasData("Graceful Shutdown")
+        .hasNoLeaks();
+
+    stream.dispose();
+    Assertions.assertThat(rSocketRequester.isDisposed()).isFalse();
+    Assertions.assertThat(rule.connection.isDisposed()).isFalse();
+    onGracefulShutdownSubscriber.assertTerminated();
+
+    FrameAssert.assertThat(rule.connection.awaitFrame())
+        .typeOf(CANCEL)
+        .hasClientSideStreamId()
+        .hasNoLeaks();
+
+    rule.otherGracefulShutdownSink.tryEmitEmpty();
+    Assertions.assertThat(rSocketRequester.isDisposed()).isTrue();
+    Assertions.assertThat(rule.connection.isDisposed()).isTrue();
+    onCloseSubscriber.assertNotTerminated();
+
+    rule.otherClosedSink.tryEmitEmpty();
+    onCloseSubscriber.assertTerminated();
+
+    rule.assertHasNoLeaks();
+  }
+
   public static class ClientSocketRule extends AbstractSocketRule<RSocketRequester> {
 
+    protected Sinks.Empty<Void> onGracefulShutdownStartedSink;
+    protected Sinks.Empty<Void> otherGracefulShutdownSink;
+    protected Sinks.Empty<Void> thisGracefulShutdownSink;
     protected Sinks.Empty<Void> thisClosedSink;
     protected Sinks.Empty<Void> otherClosedSink;
 
     @Override
     protected RSocketRequester newRSocket() {
+      this.onGracefulShutdownStartedSink = Sinks.empty();
+      this.otherGracefulShutdownSink = Sinks.empty();
+      this.thisGracefulShutdownSink = Sinks.empty();
       this.thisClosedSink = Sinks.empty();
       this.otherClosedSink = Sinks.empty();
       return new RSocketRequester(
@@ -1490,7 +1549,10 @@ public class RSocketRequesterTest {
           null,
           (__) -> null,
           null,
+          onGracefulShutdownStartedSink,
+          thisGracefulShutdownSink,
           thisClosedSink,
+          otherGracefulShutdownSink.asMono().and(thisGracefulShutdownSink.asMono()),
           otherClosedSink.asMono().and(thisClosedSink.asMono()));
     }
 

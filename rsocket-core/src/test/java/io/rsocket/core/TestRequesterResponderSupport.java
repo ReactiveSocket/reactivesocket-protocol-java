@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 import org.assertj.core.api.Assertions;
 import reactor.core.Exceptions;
+import reactor.core.publisher.Sinks;
 import reactor.util.annotation.Nullable;
 
 final class TestRequesterResponderSupport extends RequesterResponderSupport implements RSocket {
@@ -58,7 +59,8 @@ final class TestRequesterResponderSupport extends RequesterResponderSupport impl
         PayloadDecoder.ZERO_COPY,
         connection,
         streamIdSupplier,
-        (__) -> requestInterceptor);
+        (__) -> requestInterceptor,
+        Sinks.empty());
     this.error = error;
   }
 

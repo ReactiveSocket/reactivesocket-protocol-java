@@ -5,6 +5,7 @@ import static io.rsocket.frame.FrameLengthCodec.FRAME_LENGTH_MASK;
 import io.rsocket.DuplexConnection;
 import io.rsocket.RSocket;
 import io.rsocket.frame.decoder.PayloadDecoder;
+import reactor.core.publisher.Sinks;
 import reactor.util.annotation.Nullable;
 
 public class TestRequesterResponderSupport extends RequesterResponderSupport implements RSocket {
@@ -27,7 +28,8 @@ public class TestRequesterResponderSupport extends RequesterResponderSupport imp
         PayloadDecoder.ZERO_COPY,
         connection,
         streamIdSupplier,
-        __ -> null);
+        __ -> null,
+        Sinks.empty());
     this.requesterLeaseTracker = requesterLeaseTracker;
   }
 

@@ -84,7 +84,10 @@ public class KeepAliveTest {
             new DefaultKeepAliveHandler(),
             r -> null,
             null,
+            Sinks.empty(),
+            Sinks.empty(),
             empty,
+            Sinks.<Void>empty().asMono(),
             empty.asMono());
     return new RSocketState(rSocket, allocator, connection, empty);
   }
@@ -117,7 +120,10 @@ public class KeepAliveTest {
                 Mockito.mock(ResumeStateHolder.class)),
             __ -> null,
             null,
+            Sinks.empty(),
+            Sinks.empty(),
             onClose,
+            Sinks.<Void>empty().asMono(),
             onClose.asMono());
     return new ResumableRSocketState(rSocket, connection, resumableConnection, onClose, allocator);
   }

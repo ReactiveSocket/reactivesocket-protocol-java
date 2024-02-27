@@ -655,9 +655,15 @@ public class RSocketConnector {
                                     requesterLeaseTracker = null;
                                   }
 
+                                  final Sinks.Empty<Void> requesterOnGracefulShutdownSink =
+                                      Sinks.unsafe().empty();
+                                  final Sinks.Empty<Void> responderOnGracefulShutdownSink =
+                                      Sinks.unsafe().empty();
                                   final Sinks.Empty<Void> requesterOnAllClosedSink =
                                       Sinks.unsafe().empty();
                                   final Sinks.Empty<Void> responderOnAllClosedSink =
+                                      Sinks.unsafe().empty();
+                                  final Sinks.Empty<Void> requesterGracefulShutdownStartedSink =
                                       Sinks.unsafe().empty();
 
                                   RSocket rSocketRequester =
@@ -673,7 +679,12 @@ public class RSocketConnector {
                                           keepAliveHandler,
                                           interceptors::initRequesterRequestInterceptor,
                                           requesterLeaseTracker,
+                                          requesterGracefulShutdownStartedSink,
+                                          requesterOnGracefulShutdownSink,
                                           requesterOnAllClosedSink,
+                                          Mono.whenDelayError(
+                                              responderOnGracefulShutdownSink.asMono(),
+                                              requesterOnGracefulShutdownSink.asMono()),
                                           Mono.whenDelayError(
                                               responderOnAllClosedSink.asMono(),
                                               requesterOnAllClosedSink.asMono()));
@@ -725,7 +736,9 @@ public class RSocketConnector {
                                                                         leases.sender)
                                                         : interceptors
                                                             ::initResponderRequestInterceptor,
-                                                    responderOnAllClosedSink);
+                                                    responderOnGracefulShutdownSink,
+                                                    responderOnAllClosedSink,
+                                                    requesterGracefulShutdownStartedSink.asMono());
 
                                             return wrappedRSocketRequester;
                                           })

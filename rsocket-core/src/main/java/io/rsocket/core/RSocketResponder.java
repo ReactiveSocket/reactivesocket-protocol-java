@@ -73,7 +73,9 @@ class RSocketResponder extends RequesterResponderSupport implements RSocket {
       int maxFrameLength,
       int maxInboundPayloadSize,
       Function<RSocket, ? extends RequestInterceptor> requestInterceptorFunction,
-      Sinks.Empty<Void> onThisSideClosedSink) {
+      Sinks.Empty<Void> onGracefulShutdownSink,
+      Sinks.Empty<Void> onThisSideClosedSink,
+      Mono<Void> onRequesterGracefulShutdownStarted) {
     super(
         mtu,
         maxFrameLength,
@@ -81,7 +83,8 @@ class RSocketResponder extends RequesterResponderSupport implements RSocket {
         payloadDecoder,
         connection,
         null,
-        requestInterceptorFunction);
+        requestInterceptorFunction,
+        onGracefulShutdownSink);
 
     this.requestHandler = requestHandler;
 
@@ -92,12 +95,18 @@ class RSocketResponder extends RequesterResponderSupport implements RSocket {
         .onClose()
         .subscribe(null, this::tryTerminateOnConnectionError, this::tryTerminateOnConnectionClose);
 
+    onRequesterGracefulShutdownStarted.subscribe(null, null, this::onGracefulShutdownStarted);
+
     connection.receive().subscribe(this::handleFrame, e -> {});
+  }
+
+  private void onGracefulShutdownStarted() {
+    super.terminate();
+    requestHandler.disposeGracefully();
   }
 
   private void tryTerminateOnConnectionError(Throwable e) {
     if (LOGGER.isDebugEnabled()) {
-
       LOGGER.debug("Try terminate connection on responder side");
     }
     tryTerminate(() -> e);
