@@ -23,12 +23,16 @@ import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.handler.TracingObservationHandler;
 import io.micrometer.tracing.internal.EncodingUtils;
 import io.micrometer.tracing.propagation.Propagator;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
 import io.rsocket.Payload;
+import io.rsocket.metadata.CompositeMetadataCodec;
 import io.rsocket.metadata.TracingMetadataCodec;
-import java.util.HashSet;
+import io.rsocket.metadata.WellKnownMimeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashSet;
 
 public class RSocketRequesterTracingObservationHandler
     implements TracingObservationHandler<RSocketContext> {
@@ -115,17 +119,22 @@ public class RSocketRequesterTracingObservationHandler
     long[] spanId = EncodingUtils.fromString(traceContext.spanId());
     long[] parentSpanId = EncodingUtils.fromString(traceContext.parentId());
     boolean isTraceId128Bit = traceIds.length == 2;
+    final ByteBufAllocator allocator = newMetadata.alloc();
     if (isTraceId128Bit) {
-      TracingMetadataCodec.encode128(
-          newMetadata.alloc(),
+      CompositeMetadataCodec.encodeAndAddMetadata(newMetadata,
+        allocator, WellKnownMimeType.MESSAGE_RSOCKET_TRACING_ZIPKIN,
+        TracingMetadataCodec.encode128(
+          allocator,
           traceIds[0],
           traceIds[1],
           spanId[0],
           EncodingUtils.fromString(traceContext.parentId())[0],
-          flags);
+          flags));
     } else {
-      TracingMetadataCodec.encode64(
-          newMetadata.alloc(), traceIds[0], spanId[0], parentSpanId[0], flags);
+      CompositeMetadataCodec.encodeAndAddMetadata(newMetadata,
+        allocator, WellKnownMimeType.MESSAGE_RSOCKET_TRACING_ZIPKIN,
+        TracingMetadataCodec.encode64(
+          allocator, traceIds[0], spanId[0], parentSpanId[0], flags));
     }
   }
 }
