@@ -22,7 +22,7 @@ plugins {
 }
 
 def os_suffix = ""
-if (osdetector.classifier in ["linux-x86_64", "osx-x86_64", "windows-x86_64"]) {
+if (osdetector.classifier in ["linux-x86_64", "linux-aarch_64", "osx-x86_64", "osx-aarch_64", "windows-x86_64"]) {
     os_suffix = "::" + osdetector.classifier
 }
 
