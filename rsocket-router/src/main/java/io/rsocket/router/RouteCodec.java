@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 the original author or authors.
+ * Copyright 2015-Present the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,30 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-plugins {
-    id 'com.gradle.enterprise' version '3.1'
+
+package io.rsocket.router;
+
+import io.netty.buffer.ByteBuf;
+import io.rsocket.frame.FrameType;
+import reactor.util.annotation.Nullable;
+
+public interface RouteCodec {
+
+  @Nullable
+  Route decode(ByteBuf metadataByteBuf, FrameType requestType);
 }
-
-rootProject.name = 'rsocket-java'
-
-include 'rsocket-core'
-include 'rsocket-load-balancer'
-include 'rsocket-router'
-include 'rsocket-micrometer'
-include 'rsocket-test'
-include 'rsocket-transport-local'
-include 'rsocket-transport-netty'
-include 'rsocket-bom'
-
-include 'rsocket-examples'
-include 'benchmarks'
-
-
-
-gradleEnterprise {
-    buildScan {
-        termsOfServiceUrl = 'https://gradle.com/terms-of-service'
-        termsOfServiceAgree = 'yes'
-    }
-}
-
